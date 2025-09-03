@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Collections;
 
 [RequireComponent(typeof(Collider2D))]
 public class Person : MonoBehaviour
@@ -7,9 +8,10 @@ public class Person : MonoBehaviour
     private bool isDragging = false;
 
     private Vector3 lastValidPosition;
-    private Vector3 seatTarget;
-
+    private Seat lastSeat;
     private float snapSpeed = 10f;
+
+    private Coroutine snapRoutine;
 
     private void Start()
     {
@@ -20,10 +22,10 @@ public class Person : MonoBehaviour
     {
         isDragging = true;
         offset = transform.position - GetMouseWorldPos();
-        CursorController.Instance.SetCursor(CursorState.Dragging);
-
-        // Free seat since we’re moving
-        SeatManager.Instance.FreeSeat(lastValidPosition);
+        if (CursorController.Instance != null)
+            CursorController.Instance.SetCursor(CursorState.Dragging);
+      
+        Debug.Log("[Person] CLICKED on " + gameObject.name);
     }
 
     private void OnMouseDrag()
@@ -38,43 +40,32 @@ public class Person : MonoBehaviour
     private void OnMouseUp()
     {
         isDragging = false;
-        CursorController.Instance.SetCursor(CursorState.Normal);
+        if (CursorController.Instance != null)
+            CursorController.Instance.SetCursor(CursorState.Normal);
 
-        // Find nearest seat (grid tile with Seat tag)
-        Collider2D nearestSeat = FindNearestSeat();
-        if (nearestSeat != null)
+        Seat nearestSeat = SeatManager.Instance.GetNearestSeat(transform.position);
+        if (nearestSeat != null && SeatManager.Instance.TryOccupySeat(nearestSeat, this))
         {
-            Vector3 seatPos = nearestSeat.transform.position;
+            if (lastSeat != null) SeatManager.Instance.FreeSeat(lastSeat);
 
-            if (!SeatManager.Instance.IsSeatOccupied(seatPos))
-            {
-                // Snap to seat with animation
-                seatTarget = seatPos;
-                lastValidPosition = seatPos;
-                StartCoroutine(SnapToSeat(seatPos));
-
-                SeatManager.Instance.TryOccupySeat(seatPos, this);
-                return;
-            }
-            else
-            {
-                CursorController.Instance.SetCursor(CursorState.Blocked);
-            }
+            lastSeat = nearestSeat;
+            lastValidPosition = nearestSeat.transform.position;
+            StartSnap(nearestSeat.transform.position);
         }
-
-        // If no valid seat → revert
-        StartCoroutine(SnapToSeat(lastValidPosition));
-        SeatManager.Instance.TryOccupySeat(lastValidPosition, this);
+        else
+        {
+            StartSnap(lastValidPosition);
+        }
     }
 
     private Vector3 GetMouseWorldPos()
     {
         Vector3 mouse = Input.mousePosition;
-        mouse.z = 10f; // distance from camera
+        mouse.z = 10f;
         return Camera.main.ScreenToWorldPoint(mouse);
     }
 
-    private System.Collections.IEnumerator SnapToSeat(Vector3 target)
+    private IEnumerator SnapToSeat(Vector3 target)
     {
         while (Vector3.Distance(transform.position, target) > 0.05f)
         {
@@ -84,25 +75,9 @@ public class Person : MonoBehaviour
         transform.position = target;
     }
 
-    private Collider2D FindNearestSeat()
+    private void StartSnap(Vector3 target)
     {
-        Collider2D[] hits = Physics2D.OverlapCircleAll(transform.position, 1f);
-        Collider2D nearest = null;
-        float minDist = float.MaxValue;
-
-        foreach (var hit in hits)
-        {
-            if (hit.CompareTag("Seat"))
-            {
-                float dist = Vector3.Distance(transform.position, hit.transform.position);
-                if (dist < minDist)
-                {
-                    minDist = dist;
-                    nearest = hit;
-                }
-            }
-        }
-
-        return nearest;
+        if (snapRoutine != null) StopCoroutine(snapRoutine);
+        snapRoutine = StartCoroutine(SnapToSeat(target));
     }
 }
